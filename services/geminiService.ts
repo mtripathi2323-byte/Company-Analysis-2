@@ -1,11 +1,11 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { CompanyReport } from "../types";
 
 export const fetchCompanyData = async (companyName: string): Promise<CompanyReport> => {
   const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
-    throw new Error("API Key is missing. Please check your Vercel Environment Variables (API_KEY).");
+    throw new Error("API Key is missing. Please check your Environment Variables (API_KEY).");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -23,6 +23,7 @@ export const fetchCompanyData = async (companyName: string): Promise<CompanyRepo
     3. Do NOT include citation markers (like [1], [2]) inside the JSON strings.
     4. Ensure all arrays and objects are correctly comma-separated.
     5. Double-check that there is a comma after every string in a list, especially in the "growthStrategy" and "projections" arrays.
+    6. Do NOT add any conversational text before or after the JSON.
     
     The JSON must match this structure exactly:
     {
@@ -83,8 +84,23 @@ export const fetchCompanyData = async (companyName: string): Promise<CompanyRepo
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
+        // Adjust safety settings to prevent blocking legitimate financial data
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+        ]
       },
     });
+
+    // Check if the model refused to answer
+    if (response.candidates?.[0]?.finishReason && response.candidates[0].finishReason !== "STOP") {
+      console.warn("Model Finish Reason:", response.candidates[0].finishReason);
+      if (response.candidates[0].finishReason === "SAFETY") {
+        throw new Error("The request was blocked by safety filters. Please try a different company name.");
+      }
+    }
 
     // 1. Extract JSON from text (handling potential markdown wrapping)
     let jsonText = response.text || "{}";
@@ -98,19 +114,20 @@ export const fetchCompanyData = async (companyName: string): Promise<CompanyRepo
     
     if (firstBrace === -1 || lastBrace === -1) {
         console.error("Raw response:", response.text);
-        throw new Error("Invalid JSON structure received from Gemini.");
+        throw new Error("The AI response did not contain valid JSON data. Please try again.");
     }
     
     jsonText = jsonText.substring(firstBrace, lastBrace + 1);
 
     // --- ROBUST JSON SANITIZATION ---
-    // 1. Remove trailing commas before closing braces/brackets
+    // 1. Remove trailing commas before closing braces/brackets (common LLM error)
     jsonText = jsonText.replace(/,\s*([\]}])/g, '$1');
     
-    // 2. Fix missing commas between strings in arrays (e.g., "A"\n"B" -> "A","B")
-    // This looks for a double quote, optional whitespace/newlines, then another double quote
-    // We only apply this if it looks like a list item separation
-    jsonText = jsonText.replace(/("\s*[\r\n]+\s*")/g, '", "');
+    // 2. Attempt to fix missing commas between string array items
+    // CAUTION: This regex finds "string"[newline]"string" and adds a comma.
+    // It is specific to cases where quotes are separated by whitespace/newlines.
+    // We avoid doing this globally to prevent breaking sentences, so we target likely array patterns.
+    // jsonText = jsonText.replace(/("\s*[\r\n]+\s*")/g, '", "'); // Removed as it can be aggressive
 
     let data: CompanyReport;
     try {
@@ -118,7 +135,12 @@ export const fetchCompanyData = async (companyName: string): Promise<CompanyRepo
     } catch (parseError) {
       console.error("JSON Parse Error:", parseError);
       console.error("Failed JSON Text:", jsonText);
-      throw new Error("Failed to parse company data. The AI response was not valid JSON.");
+      throw new Error("Failed to parse the company report data. The AI returned malformed JSON.");
+    }
+
+    // Validation: Ensure minimal data structure exists
+    if (!data.banner || !data.financials) {
+       throw new Error("The AI returned incomplete data structure.");
     }
 
     // 2. Extract Grounding Metadata (Web Sources)
@@ -143,6 +165,7 @@ export const fetchCompanyData = async (companyName: string): Promise<CompanyRepo
     return data;
   } catch (error) {
     console.error("Gemini API Error:", error);
+    // Re-throw so App.tsx can display it
     throw error;
   }
 };

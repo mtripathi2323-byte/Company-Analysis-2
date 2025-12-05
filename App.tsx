@@ -17,7 +17,9 @@ const App: React.FC = () => {
       const data = await fetchCompanyData(term);
       setReportData(data);
     } catch (err) {
-      setError("Failed to generate report. Please try again or check your API key/Internet.");
+      // Extract the actual error message to show to the user
+      const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setError(errorMessage);
       console.error(err);
     } finally {
       setLoading(false);
@@ -46,13 +48,23 @@ const App: React.FC = () => {
           <AlertCircle size={48} />
         </div>
         <h2 className="text-xl font-bold text-slate-800">Analysis Failed</h2>
-        <p className="text-slate-600 max-w-md">{error}</p>
-        <button 
-          onClick={handleBack}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Try Again
-        </button>
+        <p className="text-slate-600 max-w-lg mx-auto bg-white p-4 rounded border border-red-200">
+          {error}
+        </p>
+        <div className="flex gap-4">
+            <button 
+            onClick={handleBack}
+            className="px-6 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
+            >
+            Back to Search
+            </button>
+            <button 
+            onClick={() => window.location.reload()}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+            Reload Page
+            </button>
+        </div>
       </div>
     );
   }
