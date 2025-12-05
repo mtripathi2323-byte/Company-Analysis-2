@@ -1,10 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 import { CompanyReport } from "../types";
 
-const apiKey = process.env.API_KEY;
-const ai = new GoogleGenAI({ apiKey });
-
 export const fetchCompanyData = async (companyName: string): Promise<CompanyReport> => {
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("API Key is missing. Please check your Vercel Environment Variables (API_KEY).");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   const modelId = "gemini-2.5-flash";
 
   const prompt = `
